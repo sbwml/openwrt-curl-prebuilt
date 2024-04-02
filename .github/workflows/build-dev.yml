@@ -1,0 +1,95 @@
+name: Build Dev Packages
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [dev]
+
+jobs:
+  build:
+    if: github.event.repository.owner.id == github.event.sender.id
+    name: Build ${{ matrix.arch }}-${{ matrix.tag }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - arm_arm1176jzf-s_vfp
+          - arm_arm926ej-s
+          - arm_cortex-a15_neon-vfpv4
+          - arm_cortex-a5_vfpv4
+          - arm_cortex-a7
+          - arm_cortex-a7_neon-vfpv4
+          - arm_cortex-a7_vfpv4
+          - arm_cortex-a8_vfpv3
+          - arm_cortex-a9
+          - arm_cortex-a9_neon
+          - arm_cortex-a9_vfpv3-d16
+          - arm_fa526
+          - arm_mpcore
+          - arm_xscale
+          - i386_pentium-mmx
+          - i386_pentium4
+          - mips64_octeonplus
+          - mips_24kc
+          - mips_4kec
+          - mips_mips32
+          - mipsel_24kc
+          - mipsel_24kc_24kf
+          - mipsel_74kc
+          - mipsel_mips32
+          - powerpc_464fp
+          - powerpc_8548
+          - riscv64_riscv64
+          - x86_64
+        tag:
+          - openwrt-23.05
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Source
+        run: |
+          # curl
+          git clone https://github.com/sbwml/feeds_packages_net_curl curl
+          # curl: enable nghttp3 & openssl quic
+          sed -i 's/default LIBCURL_MBEDTLS/default LIBCURL_OPENSSL/g' curl/Config.in
+          sed -i '/config LIBCURL_NGHTTP3/,+3 s/default n/default y/' curl/Config.in
+          sed -i '/config LIBCURL_OPENSSL_QUIC/,+3 s/default n/default y/' curl/Config.in
+          # version
+          curl_version=$(grep -Po '(?<=PKG_VERSION:=).*' curl/Makefile)
+          echo "curl_version=$curl_version" >> "$GITHUB_ENV"
+          # depends
+          git clone https://github.com/sbwml/package_libs_nghttp3 nghttp3
+          # openssl 3.2
+          git clone https://github.com/sbwml/package_libs_openssl -b openssl-3.2 openssl
+
+      - name: Build Packages
+        uses: sbwml/openwrt-gh-action-sdk@curl
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.tag }}
+          FEEDNAME: packages_ci
+          PACKAGES: curl
+          NO_REFRESH_CHECK: true
+          IGNORE_ERRORS: false
+
+      - name: Create compress files
+        run: |
+          tar -zcvf curl-${{ env.curl_version }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
+
+      - name: Release packages
+        uses: ncipollo/release-action@v1
+        with:
+          name: curl-${{ env.curl_version }}-openssl-quic
+          commit: main
+          tag: ${{ env.curl_version }}-openssl-quic
+          token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
+          replacesArtifacts: true
+          prerelease: true
+          artifacts: "curl-${{ env.curl_version }}-${{ matrix.arch }}.tar.gz"
